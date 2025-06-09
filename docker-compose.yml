@@ -1,0 +1,27 @@
+
+services:
+  odoo:
+    image: ofleet/odoo:18-20250415-enterprise
+    command: echo "hello"
+    depends_on:
+      - postgres
+    ports:
+      - "8069:8069"
+    environment:
+    - HOST=postgres
+    - USER=odoo
+    - PASSWORD=odoo
+    volumes:
+      - ./config:/etc/odoo:rw
+      - ./src:/mnt/extra-addons
+  postgres:
+    image: postgres:15.0
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_PASSWORD=odoo
+      - POSTGRES_USER=odoo
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data/pgdata
+volumes:
+  postgres-data:

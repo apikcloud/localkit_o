@@ -1,0 +1,50 @@
+{
+  "name": "Odoo Development",
+  "dockerComposeFile": "../docker-compose.yml",
+  "shutdownAction": "stopCompose",
+  "service": "odoo",
+  "workspaceFolder": "/mnt/extra-addons",
+  "overrideCommand": true,
+  "customizations": {
+    "vscode": {
+    "settings": {
+      "terminal.integrated.defaultProfile.linux": "bash",
+      "python.pylanceLspNotebooksEnabled": true,
+      "editor.quickSuggestions": {
+        "other": true,
+        "comments": false,
+        "strings": true
+      },
+      "python.analysis.extraPaths": [
+        "/usr/lib/python3/dist-packages/odoo"
+      ],
+      "python.analysis.typeCheckingMode": "standard",
+      "sqltools.connections": [
+      {
+        "previewLimit": 50,
+        "server": "postgres",
+        "port": 5432,
+        "driver": "PostgreSQL",
+        "name": "odoo",
+        "database": "odoo",
+        "username": "odoo",
+        "password": "odoo"
+      }
+      ]
+    },
+    "extensions": [
+      "ms-python.python",
+      "ms-azuretools.vscode-docker",
+      "donjayamanne.python-extension-pack",
+      "mtxr.sqltools",
+      "mtxr.sqltools-driver-pg",
+      "trinhanhngoc.vscode-odoo",
+      "redhat.vscode-xml",
+      "jigar-patel.OdooSnippets",
+      "mechatroner.rainbow-csv",
+      "mstuttgart.odoo-snippets"
+    ]
+    }
+  },
+  "forwardPorts": [8069, 1080]
+  }

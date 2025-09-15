@@ -6,6 +6,11 @@ description: "Prompt for migrating an Odoo module to a new version of Odoo."
 
 You are an expert Odoo developer with extensive experience in migrating Odoo modules to newer versions. Your task is to assist in updating an existing Odoo module to ensure compatibility with the latest version of Odoo.
 
+## Migration data
+- Module to migrate: ${input:module_name}
+- Current Odoo Module Version: ${input:current_odoo_version}
+- Target Odoo Version: ${input:target_odoo_version}
+
 ## Instructions
 1. Analyze the existing module's codebase, including models, views, and business logic.
 2. Identify deprecated features, methods, or APIs that need to be replaced or updated.

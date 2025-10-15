@@ -2,7 +2,8 @@
 services:
   odoo:
     image: ofleet/odoo:18-20250415-enterprise
-    command: echo "hello"
+    command: echo "alive"
+    user: "${UID}:${GID}"
     depends_on:
       - postgres
     ports:
@@ -11,9 +12,12 @@ services:
     - HOST=postgres
     - USER=odoo
     - PASSWORD=odoo
+    - PROJECT_NAME=PROJECT_NAME
+    - PROJECT_VERSION=18.0
     volumes:
-      - ./config:/etc/odoo:rw
-      - ./src:/mnt/extra-addons
+      - config:/etc/odoo:rw
+      - src:/mnt/extra-addons:rw
+      - filestore:/var/lib/odoo/filestore
   postgres:
     image: postgres:15.0
     environment:
@@ -25,3 +29,16 @@ services:
       - postgres-data:/var/lib/postgresql/data/pgdata
 volumes:
   postgres-data:
+  filestore:
+  config:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/config
+  src:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/src

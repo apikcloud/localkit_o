@@ -29,7 +29,7 @@ services:
       - postgres-data:/var/lib/postgresql/data/pgdata
 volumes:
   postgres-data:
-    filestore:
+  data:
     driver: local
     driver_opts:
       type: none

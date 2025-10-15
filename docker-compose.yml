@@ -17,7 +17,6 @@ services:
     volumes:
       - config:/etc/odoo:rw
       - src:/mnt/extra-addons:rw
-      - filestore:/var/lib/odoo/data
   postgres:
     image: postgres:15.0
     environment:
@@ -29,12 +28,6 @@ services:
       - postgres-data:/var/lib/postgresql/data/pgdata
 volumes:
   postgres-data:
-  data:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PWD}/data
   config:
     driver: local
     driver_opts:

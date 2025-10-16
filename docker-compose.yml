@@ -1,7 +1,7 @@
 
 services:
   odoo:
-    image: ofleet/odoo:18-20250415-enterprise
+    image: ofleet/odoo:18-20251015-enterprise
     command: echo "alive"
     user: "${UID}:${GID}"
     depends_on:

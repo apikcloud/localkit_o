@@ -1,0 +1,16 @@
+{
+  "folders": [
+    {
+      "name": "extra-addons",
+      "path": "/mnt/extra-addons" 
+    },
+    {
+      "name": "odoo",
+      "path": "/usr/lib/python3/dist-packages/odoo"
+    }
+  ],
+  "settings": {
+    "xml.symbols.enabled": false,
+    "python.languageServer": "None"
+  },
+}

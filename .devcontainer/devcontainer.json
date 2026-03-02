@@ -1,105 +1,82 @@
 {
-  "name": "Odoo Development",
-  "dockerComposeFile": "../docker-compose.yml",
-  "shutdownAction": "stopCompose",
-  "service": "odoo",
-  "workspaceFolder": "/mnt/extra-addons",
-  "containerEnv": {
-    "PIP_NO_CACHE_DIR": "1",
-    "PYTHONDONTWRITEBYTECODE": "1",
-    "DEBIAN_FRONTEND": "noninteractive"
-  },
-  "overrideCommand": true,
-  "customizations": {
-    "vscode": {
-    "settings": {
-      "terminal.integrated.defaultProfile.linux": "bash",
-      "editor.quickSuggestions": {
-        "other": true,
-        "comments": true,
-        "strings": true
-      },
-      "python.analysis.completeFunctionParens": true,
-      "python.analysis.autoImportCompletions": true,
-      "python.analysis.indexing": false,
-      "extensions.autoUpdate": false,
-      "telemetry.telemetryLevel": "off",
-      "python.defaultInterpreterPath": "/usr/bin/python3",
-      "python.pylanceLspNotebooksEnabled": true,
-      "python.editor.defaultFormatter": "ms-python.black-formatter",
-      "python.linting.enabled": true,
-      "python.linting.pylintEnabled": true,
-      "python.linting.pylintArgs": [
-        "--load-plugins=pylint_odoo",
-        "--valid-odoo-versions=18.0"
-      ],
-      "python.formatting.provider": "black",
-      "[python]": {
-        "editor.formatOnSave": true,
-        "editor.codeActionsOnSave": {
-          "source.organizeImports": true
-        }
-      },
-      "python.analysis.extraPaths": [
-        "/usr/lib/python3/dist-packages/odoo"
-      ],
-      "python.analysis.typeCheckingMode": "standard",
-      "sqltools.connections": [
-      {
-        "previewLimit": 50,
-        "server": "postgres",
-        "port": 5432,
-        "driver": "PostgreSQL",
-        "name": "odoo",
-        "database": "odoo",
-        "username": "odoo",
-        "password": "odoo"
-      }
-      ]
-    },
-    "files.associations": {
-      "*.xml": "xml",
-      "*.rng": "xml",
-      "*.po": "gettext",
-      "*.pot": "gettext"
-    },
-    "xml.validation.enabled": true,
-    "emmet.includeLanguages": {
-      "xml": "html"
-    },
-    "files.watcherExclude": {
-      "**/filestore/**": true,
-      "**/sessions/**": true,
-      "**/.git/**": true,
-      "**/node_modules/**": true
-    },
-    "search.exclude": {
-      "**/filestore": true,
-      "**/sessions": true
-    },
-    "extensions": [
-      "ms-python.python",
-      "ms-python.pylint", 
-      "ms-python.flake8",
-      "ms-python.mypy-type-checker",
-      "ms-python.black-formatter",
-      "ms-python.debugpy",
-      "charliermarsh.ruff",
-      "mtxr.sqltools",
-      "mtxr.sqltools-driver-pg",
-      "trinhanhngoc.vscode-odoo",
-      "redhat.vscode-xml",
-      "jigar-patel.OdooSnippets",
-      "mechatroner.rainbow-csv",
-      "streetsidesoftware.code-spell-checker",
-      "formulahendry.auto-rename-tag",
-      "oderwat.indent-rainbow",
-      "GitHub.copilot",
-      "GitHub.copilot-chat",
-      "GitHub.copilot-labs"
-    ]
-    }
-  },
-  "postCreateCommand": "REQ_FILE=$(find /mnt/extra-addons -maxdepth 2 -name 'requirements.txt' | head -1); if [ -n \"$REQ_FILE\" ]; then pip install --upgrade pip && pip install -r \"$REQ_FILE\"; fi",
-  "forwardPorts": [8069, 1080]
-  }
+	"name": "Odoo Development",
+	"dockerComposeFile": "../docker-compose.yml",
+	"service": "odoo",
+	"runServices": ["odoo", "postgres"],
+	"shutdownAction": "stopCompose",
+	"workspaceFolder": "/mnt/extra-addons",
+	"overrideCommand": true,
+	"remoteUser": "odoo",
+	"containerEnv": {
+		"PIP_NO_CACHE_DIR": "1",
+		"PYTHONDONTWRITEBYTECODE": "1",
+		"DEBIAN_FRONTEND": "noninteractive",
+		"NODE_OPTIONS": "--max-old-space-size=4096"
+	},
+	"customizations": {
+		"vscode": {
+			"settings": {
+				"terminal.integrated.defaultProfile.linux": "bash",
+				"editor.quickSuggestions": {
+					"other": true,
+					"comments": true,
+					"strings": true
+				},
+				"files.watcherInclude": [
+					"/mnt/extra-addons/**"
+				],
+				"python.defaultInterpreterPath": "/usr/bin/python3",
+				"python.languageServer": "Pylance",
+				"python.analysis.completeFunctionParens": true,
+				"python.analysis.autoImportCompletions": true,
+				"python.analysis.typeCheckingMode": "basic",
+				"python.analysis.persistAllIndices": true,
+				"python.analysis.extraPaths": [
+					"/usr/lib/python3/dist-packages/odoo", 
+				],
+				"python.analysis.indexing": true,
+				"python.analysis.packageIndexDepths": [
+					{ "name": "odoo", "depth": 10 }
+				],
+				"python.linting.enabled": true,
+				"python.linting.pylintEnabled": true,
+				"python.linting.pylintArgs": [
+					"--load-plugins=pylint_odoo",
+					"--valid-odoo-versions=19.0",
+					"--rcfile=/mnt/extra-addons/.pylintrc"
+				],
+				"python.editor.defaultFormatter": "ms-python.black-formatter",
+				"python.editor.formatOnSave": true,
+				"python.editor.codeActionsOnSave": {
+					"source.organizeImports": true
+				},
+				"files.watcherExclude": {
+					"**/node_modules/**": true,
+					"**/filestore/**": true,
+					"**/__pycache__/**": true,
+					"**/.git/**": true
+				},
+				"extensions.autoUpdate": false,
+				"telemetry.telemetryLevel": "off",
+			},
+			"xml.validation.enabled": true,
+			"emmet.includeLanguages": {
+			"xml": "html"
+			},
+			"extensions": [
+				"ms-python.python",
+				"ms-python.vscode-pylance",
+				"ms-python.pylint", 
+				"ms-python.flake8",
+				"ms-python.black-formatter",
+				"ms-python.debugpy",
+				"redhat.vscode-xml",
+				"jigar-patel.OdooSnippets",
+				"mechatroner.rainbow-csv",
+				"formulahendry.auto-rename-tag",
+			]
+		}
+	},
+	"postCreateCommand": "bash -c 'mkdir -p /mnt/extra-addons/.config && ln -sf /etc/odoo /mnt/extra-addons/.config/ && REQ_FILE=$(find /mnt/extra-addons -maxdepth 2 -name \"requirements.txt\" | head -1); if [ -n \"$REQ_FILE\" ]; then pip install --upgrade pip && pip install -r \"$REQ_FILE\"; fi'",
+	"forwardPorts": [8069, 1080]
+}

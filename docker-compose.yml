@@ -1,24 +1,21 @@
-
 services:
   odoo:
-    image: ofleet/odoo:18-20251015-enterprise
-    command: echo "alive"
-    user: "${UID}:${GID}"
+    image: odoo-custom:19.0
     depends_on:
       - postgres
     ports:
       - "8069:8069"
-    environment:
-    - HOST=postgres
-    - USER=odoo
-    - PASSWORD=odoo
-    - PROJECT_NAME=${PROJECT_NAME}
-    - PROJECT_VERSION=${PROJECT_VERSION}
+    env_file:
+      - ${PWD}/.env
     volumes:
-      - config:/etc/odoo:rw
-      - src:/mnt/extra-addons:rw
+      - ./config:/etc/odoo:rw
+      - ./src:/mnt/extra-addons:rw
+      - filestore:/var/lib/odoo/data/filestore:rw
+      - vscode-server-cache:/home/.vscode-server-insiders
   postgres:
     image: postgres:15.0
+    env_file:
+      - .env
     environment:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
@@ -28,15 +25,5 @@ services:
       - postgres-data:/var/lib/postgresql/data/pgdata
 volumes:
   postgres-data:
-  config:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PWD}/config
-  src:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PWD}/src
+  filestore:
+  vscode-server-cache:

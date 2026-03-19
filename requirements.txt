@@ -1,0 +1,16 @@
+pylint
+pylint-odoo
+black
+flake8
+isort
+pytest
+pytest-cov
+coverage
+ipython
+ipdb
+pydevd-odoo
+manifestoo
+click-odoo
+click-odoo-contrib
+pre-commit
+odoo-module-migrator

@@ -13,6 +13,18 @@
 		"DEBIAN_FRONTEND": "noninteractive",
 		"NODE_OPTIONS": "--max-old-space-size=4096"
 	},
+	"mounts": [
+		{
+			"source": "${localEnv:HOME}/.claude",
+			"target": "/var/lib/odoo/.claude",
+			"type": "bind"
+		},
+		{
+			"source": "${localEnv:HOME}/.claude.json",
+			"target": "/var/lib/odoo/.claude.json",
+			"type": "bind"
+		}
+	],
 	"customizations": {
 		"vscode": {
 			"settings": {
@@ -74,9 +86,10 @@
 				"jigar-patel.OdooSnippets",
 				"mechatroner.rainbow-csv",
 				"formulahendry.auto-rename-tag",
+				"anthropic.claude-code",
 			]
 		}
 	},
-	"postCreateCommand": "bash -c 'mkdir -p /mnt/extra-addons/.config && ln -sf /etc/odoo /mnt/extra-addons/.config/ && REQ_FILE=$(find /mnt/extra-addons -maxdepth 2 -name \"requirements.txt\" | head -1); if [ -n \"$REQ_FILE\" ]; then pip install --upgrade pip && pip install -r \"$REQ_FILE\"; fi'",
+	"postCreateCommand": "bash /usr/local/bin/post-create.sh",
 	"forwardPorts": [8069, 1080]
 }

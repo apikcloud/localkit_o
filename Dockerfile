@@ -1,4 +1,4 @@
-FROM apik/odoo:19.0-20260131-enterprise
+FROM ofleet/odoo:18-20251015-enterprise
 
 USER root
 
@@ -17,12 +17,20 @@ RUN rm -rf /var/lib/apt/lists/*
 COPY odoo-completion.bash /etc/bash_completion.d/odoo
 RUN chmod 644 /etc/bash_completion.d/odoo
 
+# Copy post-create script
+COPY .devcontainer/post-create.sh /usr/local/bin/post-create.sh
+RUN chmod +x /usr/local/bin/post-create.sh
+
 RUN mkdir -p /var/lib/odoo/data/filestore /mnt/extra-addons /etc/odoo \
     && chown -R odoo:odoo /var/lib/odoo /mnt/extra-addons /etc/odoo
 
 RUN echo "odoo ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+#Gitnexus Setup
+RUN npm install -g gitnexus
+
 USER odoo
 
-RUN source /etc/bash_completion && echo "source /etc/bash_completion" >> ~/.bashrc
+RUN source /etc/bash_completion
 
 EXPOSE 8069 8071 8072

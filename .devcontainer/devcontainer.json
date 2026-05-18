@@ -45,10 +45,13 @@
 					"--valid-odoo-versions=19.0",
 					"--rcfile=/mnt/extra-addons/.pylintrc"
 				],
-				"python.editor.defaultFormatter": "ms-python.black-formatter",
-				"python.editor.formatOnSave": true,
-				"python.editor.codeActionsOnSave": {
-					"source.organizeImports": true
+				"[python]": {
+					"editor.defaultFormatter": "charliermarsh.ruff",
+					"editor.formatOnSave": true,
+					"editor.codeActionsOnSave": {
+						"source.fixAll.ruff": "explicit",
+						"source.organizeImports.ruff": "explicit"
+					}
 				},
 				"files.watcherExclude": {
 					"**/node_modules/**": true,
@@ -66,9 +69,8 @@
 			"extensions": [
 				"ms-python.python",
 				"ms-python.vscode-pylance",
-				"ms-python.pylint", 
-				"ms-python.flake8",
-				"ms-python.black-formatter",
+				"ms-python.pylint",
+				"charliermarsh.ruff",
 				"ms-python.debugpy",
 				"redhat.vscode-xml",
 				"jigar-patel.OdooSnippets",

@@ -8,7 +8,8 @@
 #
 # Génère / met à jour :
 #   - .config/odoo.conf  (upsert par sed, création propre sans commentaires)
-#   - .vscode/tasks.json (venv, odoo, postgres, update, scaffold, shell)
+#   - docker-compose.yml (postgres exposé :5432, service odoo commenté — backup en .old)
+#   - .vscode/tasks.json (venv, pip install, odoo, postgres, update, scaffold, shell)
 #   - *.code-workspace   (extraPaths Pylance + defaultInterpreterPath)
 #   - .gitignore         (entrées locales ajoutées si absentes)
 #
@@ -186,6 +187,54 @@ else
     success "$CONF_FILE mis à jour"
 fi
 
+# ── docker-compose.yml ────────────────────────────────────────────────────────
+header "docker-compose.yml"
+
+COMPOSE_FILE="docker-compose.yml"
+
+if [[ -f "$COMPOSE_FILE" ]]; then
+    mv "$COMPOSE_FILE" "${COMPOSE_FILE}.old"
+    warn "Existant sauvegardé → ${COMPOSE_FILE}.old"
+fi
+
+cat > "$COMPOSE_FILE" <<EOF
+services:
+  # Service odoo désactivé pour le dev natif (sans Docker)
+  # odoo:
+  #   image: apik/odoo:${ODOO_VERSION}-enterprise
+  #   command: odoo --dev=all
+  #   depends_on:
+  #     - postgres
+  #   ports:
+  #     - "8069:8069"
+  #   environment:
+  #     - HOST=postgres
+  #     - USER=${DB_USER}
+  #     - PASSWORD=${DB_PASSWORD}
+  #   volumes:
+  #     - ./.config:/etc/odoo:rw
+  #     - .:/mnt/extra-addons:rw
+  #     - ${PROJECT_NAME}_odoo:/var/lib/odoo
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "${DB_PORT}:5432"
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_USER=${DB_USER}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - ${PROJECT_NAME}_postgres:/var/lib/postgresql/data/pgdata
+
+volumes:
+  # ${PROJECT_NAME}_odoo:
+  ${PROJECT_NAME}_postgres:
+EOF
+
+success "docker-compose.yml écrit"
+
 # ── .vscode/tasks.json ────────────────────────────────────────────────────────
 # Les vars bash sont passées via sys.argv pour éviter toute substitution dans
 # les literals VSCode (${workspaceFolder}, ${input:...}).
@@ -203,6 +252,11 @@ venv, odoo_bin, conf, db, community = sys.argv[1:]
 WS       = "${workspaceFolder}"
 I_MODULE = "${input:moduleUpdate}"
 I_NAME   = "${input:moduleName}"
+I_PKG    = "${input:packageName}"
+
+# Présentation réutilisables
+SILENT_CLOSE  = {"reveal": "silent", "panel": "shared", "close": True}
+DEDICATED     = {"reveal": "always", "panel": "dedicated", "focus": True}
 
 tasks = {
     "version": "2.0.0",
@@ -217,7 +271,15 @@ tasks = {
             ),
             "options": {"cwd": WS},
             "group": "build",
-            "presentation": {"reveal": "always", "panel": "shared"},
+            "presentation": SILENT_CLOSE,
+            "problemMatcher": []
+        },
+        {
+            "label": "📦 Venv: installer un package",
+            "type": "shell",
+            "command": f"uv pip install {I_PKG}",
+            "options": {"cwd": WS},
+            "presentation": SILENT_CLOSE,
             "problemMatcher": []
         },
         {
@@ -226,7 +288,7 @@ tasks = {
             "command": "docker compose up postgres -d",
             "options": {"cwd": WS},
             "group": "build",
-            "presentation": {"reveal": "always", "panel": "shared"},
+            "presentation": SILENT_CLOSE,
             "problemMatcher": []
         },
         {
@@ -236,7 +298,7 @@ tasks = {
             "options": {"cwd": WS},
             "group": "build",
             "dependsOn": "🐘 PostgreSQL: démarrer",
-            "presentation": {"reveal": "always", "panel": "dedicated", "focus": True},
+            "presentation": DEDICATED,
             "problemMatcher": []
         },
         {
@@ -250,7 +312,7 @@ tasks = {
                 "--stop-after-init"
             ),
             "options": {"cwd": WS},
-            "presentation": {"reveal": "always", "panel": "shared"},
+            "presentation": SILENT_CLOSE,
             "problemMatcher": []
         },
         {
@@ -258,7 +320,7 @@ tasks = {
             "type": "shell",
             "command": f"{venv}/bin/python {odoo_bin} scaffold {I_NAME} .",
             "options": {"cwd": WS},
-            "presentation": {"reveal": "always", "panel": "shared"},
+            "presentation": SILENT_CLOSE,
             "problemMatcher": []
         },
         {
@@ -266,7 +328,7 @@ tasks = {
             "type": "shell",
             "command": f"{venv}/bin/python {odoo_bin} shell --config={conf} --db_name={db}",
             "options": {"cwd": WS},
-            "presentation": {"reveal": "always", "panel": "dedicated", "focus": True},
+            "presentation": DEDICATED,
             "problemMatcher": []
         }
     ],
@@ -282,6 +344,12 @@ tasks = {
             "type": "promptString",
             "description": "Nom du nouveau module à scaffolder",
             "default": "my_module"
+        },
+        {
+            "id": "packageName",
+            "type": "promptString",
+            "description": "Package(s) à installer — ex: requests pandas",
+            "default": ""
         }
     ]
 }

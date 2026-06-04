@@ -150,7 +150,6 @@ db_host = ${DB_HOST}
 db_port = ${DB_PORT}
 db_user = ${DB_USER}
 db_password = ${DB_PASSWORD}
-db_name = ${DB_NAME}
 admin_passwd = ${ADMIN_PASSWD}
 limit_memory_soft = 1077721600
 limit_memory_hard = 3355443200
@@ -173,7 +172,6 @@ else
     upsert_conf "$CONF_FILE" "db_port"           "$DB_PORT"
     upsert_conf "$CONF_FILE" "db_user"           "$DB_USER"
     upsert_conf "$CONF_FILE" "db_password"       "$DB_PASSWORD"
-    upsert_conf "$CONF_FILE" "db_name"           "$DB_NAME"
     upsert_conf "$CONF_FILE" "admin_passwd"      "$ADMIN_PASSWD"
     upsert_conf "$CONF_FILE" "limit_memory_soft" "1077721600"
     upsert_conf "$CONF_FILE" "limit_memory_hard" "3355443200"
@@ -253,6 +251,7 @@ WS       = "${workspaceFolder}"
 I_MODULE = "${input:moduleUpdate}"
 I_NAME   = "${input:moduleName}"
 I_PKG    = "${input:packageName}"
+I_DB     = "${input:dbName}"
 
 # Présentation réutilisables
 SILENT_CLOSE  = {"reveal": "silent", "panel": "shared", "close": True}
@@ -310,12 +309,26 @@ tasks = {
             "problemMatcher": []
         },
         {
+            "label": "🗄️ Odoo: init base",
+            "type": "shell",
+            "command": (
+                f"{venv}/bin/python {odoo_bin} "
+                f"--config={conf} "
+                f"--db_name={I_DB} "
+                "-i base "
+                "--stop-after-init"
+            ),
+            "options": {"cwd": WS},
+            "presentation": SILENT_CLOSE,
+            "problemMatcher": []
+        },
+        {
             "label": "🔄 Odoo: update module",
             "type": "shell",
             "command": (
                 f"{venv}/bin/python {odoo_bin} "
                 f"--config={conf} "
-                f"--db_name={db} "
+                f"--db_name={I_DB} "
                 f"-u {I_MODULE} "
                 "--stop-after-init"
             ),
@@ -334,13 +347,19 @@ tasks = {
         {
             "label": "🐚 Odoo: shell",
             "type": "shell",
-            "command": f"{venv}/bin/python {odoo_bin} shell --config={conf} --db_name={db}",
+            "command": f"{venv}/bin/python {odoo_bin} shell --config={conf} --db_name={I_DB}",
             "options": {"cwd": WS},
             "presentation": DEDICATED,
             "problemMatcher": []
         }
     ],
     "inputs": [
+        {
+            "id": "dbName",
+            "type": "promptString",
+            "description": "Nom de la base de données",
+            "default": db
+        },
         {
             "id": "moduleUpdate",
             "type": "promptString",

@@ -386,53 +386,101 @@ DEFAULT_PORT=8069
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
 
-# ── Détection des instances Odoo actives ──────────────────────────────────────
-check_port() {
-    lsof -iTCP:\$1 -sTCP:LISTEN -t 2>/dev/null | head -1
+# ── Détection : qui occupe un port TCP ? ──────────────────────────────────────
+# Retourne "native:<pid>" ou "docker:<container>" ou "" si libre
+port_occupant() {
+    local port=\$1
+
+    # 1. Process natif Python/odoo-bin
+    local pid
+    pid=\$(lsof -iTCP:\$port -sTCP:LISTEN -t 2>/dev/null | head -1 || true)
+    if [[ -n "\$pid" ]]; then
+        local cmdline
+        cmdline=\$(cat /proc/\$pid/cmdline 2>/dev/null | tr '\0' ' ' || true)
+        if echo "\$cmdline" | grep -q "odoo-bin"; then
+            echo "native:\$pid"
+            return
+        fi
+    fi
+
+    # 2. Conteneur Docker exposant ce port
+    local container
+    container=\$(docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null \
+        | awk -v p=":\$port->" '\$0 ~ p {print \$1}' | head -1 || true)
+    if [[ -n "\$container" ]]; then
+        echo "docker:\$container"
+        return
+    fi
+
+    # 3. Autre process quelconque (ex: nginx, autre appli)
+    if [[ -n "\$pid" ]]; then
+        local procname
+        procname=\$(ps -p "\$pid" -o comm= 2>/dev/null || echo "PID \$pid")
+        echo "other:\$procname"
+        return
+    fi
+
+    echo ""
 }
 
-find_odoo_instances() {
-    # Retourne les PIDs de tous les processus odoo-bin en écoute
+# ── Listage de toutes les instances Odoo actives (natif + Docker) ─────────────
+list_odoo_instances() {
+    local found=0
+
+    # Natif : process python avec odoo-bin dans la cmdline
     lsof -iTCP -sTCP:LISTEN 2>/dev/null \
         | awk '\$1 == "python" || \$1 == "python3" {print \$2, \$9}' \
         | sort -u \
         | while read -r pid portinfo; do
+            local cmdline
             cmdline=\$(cat /proc/\$pid/cmdline 2>/dev/null | tr '\0' ' ' || true)
             if echo "\$cmdline" | grep -q "odoo-bin"; then
-                port=\$(echo "\$portinfo" | grep -oP ':\K[0-9]+$' || echo "?")
+                local port cwd project
+                port=\$(echo "\$portinfo" | grep -oP ':\K[0-9]+\$' || echo "?")
                 cwd=\$(readlink /proc/\$pid/cwd 2>/dev/null || echo "inconnu")
-                echo "\$pid \$port \$cwd"
+                project=\$(basename "\$cwd")
+                echo -e "  🐍 natif   PID \${CYAN}\$pid\${RESET}  :\${port}  \${YELLOW}\$project\${RESET}  (\$cwd)"
+                found=1
             fi
         done
+
+    # Docker : conteneurs avec port 8069 ou autre exposé
+    docker ps --format '{{.Names}} {{.Image}} {{.Ports}}' 2>/dev/null \
+        | grep -i "odoo\|8069" \
+        | while read -r name image ports; do
+            echo -e "  🐳 docker  \${CYAN}\$name\${RESET}  \${YELLOW}\$image\${RESET}  (\$ports)"
+            found=1
+        done
+
+    [[ \$found -eq 0 ]] && echo -e "  \${YELLOW}(aucune instance Odoo détectée)\${RESET}"
 }
 
 # ── Choix du port ─────────────────────────────────────────────────────────────
 PORT=\$DEFAULT_PORT
-occupant=\$(check_port \$PORT || true)
+occupant=\$(port_occupant \$PORT)
 
 if [[ -n "\$occupant" ]]; then
+    kind=\${occupant%%:*}
+    detail=\${occupant#*:}
+
     echo ""
-    echo -e "\${YELLOW}⚠ Port \$PORT déjà utilisé.\${RESET}"
+    echo -e "\${YELLOW}⚠  Port \$PORT déjà utilisé"
+    case "\$kind" in
+        native) echo -e "   → instance Odoo native (PID \$detail)\${RESET}" ;;
+        docker) echo -e "   → conteneur Docker : \$detail\${RESET}" ;;
+        other)  echo -e "   → autre process : \$detail\${RESET}" ;;
+    esac
     echo ""
     echo -e "\${BOLD}Instances Odoo actives :\${RESET}"
-
-    instances=\$(find_odoo_instances)
-    if [[ -n "\$instances" ]]; then
-        echo "\$instances" | while read -r pid port cwd; do
-            echo -e "  PID \${CYAN}\$pid\${RESET}  port \${CYAN}\$port\${RESET}  \$cwd"
-        done
-    else
-        echo -e "  \${YELLOW}(aucune instance odoo-bin détectée — port occupé par un autre process)\${RESET}"
-    fi
-
+    list_odoo_instances
     echo ""
     read -rp "  Port à utiliser [laisser vide pour annuler] : " input_port
     [[ -z "\$input_port" ]] && { echo "Annulé."; exit 0; }
     PORT="\$input_port"
 
-    # Vérifier que le nouveau port est libre lui aussi
-    if lsof -iTCP:\$PORT -sTCP:LISTEN -t &>/dev/null; then
-        echo -e "\${RED}✖ Port \$PORT également occupé. Abandon.\${RESET}"
+    new_occupant=\$(port_occupant "\$PORT")
+    if [[ -n "\$new_occupant" ]]; then
+        echo -e "\${RED}✖ Port \$PORT également occupé (\${new_occupant#*:}). Abandon.\${RESET}"
         exit 1
     fi
 fi
@@ -467,33 +515,48 @@ echo ""
 echo -e "${BOLD}── Instances Odoo actives ──${RESET}"
 echo ""
 
-# Collecte : PID port cwd pour chaque process odoo-bin en écoute TCP
-mapfile -t instances < <(
+# ── Collecte ──────────────────────────────────────────────────────────────────
+# Chaque entrée : "native:<pid>:<port>:<cwd>" ou "docker:<name>:<ports>:<image>"
+entries=()
+
+# Natif
+while read -r pid portinfo; do
+    cmdline=$(cat /proc/$pid/cmdline 2>/dev/null | tr '\0' ' ' || true)
+    if echo "$cmdline" | grep -q "odoo-bin"; then
+        port=$(echo "$portinfo" | grep -oP ':\K[0-9]+$' || echo "?")
+        cwd=$(readlink /proc/$pid/cwd 2>/dev/null || echo "inconnu")
+        entries+=("native:$pid:$port:$cwd")
+    fi
+done < <(
     lsof -iTCP -sTCP:LISTEN 2>/dev/null \
         | awk '$1 == "python" || $1 == "python3" {print $2, $9}' \
-        | sort -u \
-        | while read -r pid portinfo; do
-            cmdline=$(cat /proc/$pid/cmdline 2>/dev/null | tr '\0' ' ' || true)
-            if echo "$cmdline" | grep -q "odoo-bin"; then
-                port=$(echo "$portinfo" | grep -oP ':\K[0-9]+$' || echo "?")
-                cwd=$(readlink /proc/$pid/cwd 2>/dev/null || echo "inconnu")
-                echo "$pid $port $cwd"
-            fi
-        done
+        | sort -u
 )
 
-if [[ ${#instances[@]} -eq 0 ]]; then
+# Docker
+while read -r name image ports; do
+    entries+=("docker:$name:$ports:$image")
+done < <(
+    docker ps --format '{{.Names}} {{.Image}} {{.Ports}}' 2>/dev/null \
+        | grep -i "odoo\|8069" || true
+)
+
+# ── Affichage ─────────────────────────────────────────────────────────────────
+if [[ ${#entries[@]} -eq 0 ]]; then
     echo -e "  ${GREEN}Aucune instance Odoo en cours d'exécution.${RESET}"
     echo ""
     exit 0
 fi
 
-# Affichage
 i=1
-for entry in "${instances[@]}"; do
-    read -r pid port cwd <<< "$entry"
-    project=$(basename "$cwd")
-    echo -e "  ${CYAN}[$i]${RESET}  PID ${BOLD}$pid${RESET}  :${port}  ${YELLOW}$project${RESET}  (${cwd})"
+for entry in "${entries[@]}"; do
+    IFS=: read -r kind id_or_pid port_or_ports cwd_or_image <<< "$entry"
+    if [[ "$kind" == "native" ]]; then
+        project=$(basename "$cwd_or_image")
+        echo -e "  ${CYAN}[$i]${RESET}  🐍 natif   PID ${BOLD}$id_or_pid${RESET}  :${port_or_ports}  ${YELLOW}$project${RESET}  ($cwd_or_image)"
+    else
+        echo -e "  ${CYAN}[$i]${RESET}  🐳 docker  ${BOLD}$id_or_pid${RESET}  ${YELLOW}$cwd_or_image${RESET}  ($port_or_ports)"
+    fi
     ((i++))
 done
 
@@ -503,26 +566,37 @@ echo -e "  ${CYAN}[0]${RESET}  Annuler"
 echo ""
 read -rp "  Choix : " choice
 
+# ── Action ────────────────────────────────────────────────────────────────────
+stop_entry() {
+    local entry="$1"
+    IFS=: read -r kind id_or_pid port_or_ports cwd_or_image <<< "$entry"
+    if [[ "$kind" == "native" ]]; then
+        local project
+        project=$(basename "$cwd_or_image")
+        kill "$id_or_pid" \
+            && echo -e "  ${GREEN}✔${RESET} PID $id_or_pid ($project :$port_or_ports) terminé" \
+            || echo -e "  ${RED}✖${RESET} PID $id_or_pid : échec"
+    else
+        docker stop "$id_or_pid" &>/dev/null \
+            && echo -e "  ${GREEN}✔${RESET} Conteneur $id_or_pid arrêté" \
+            || echo -e "  ${RED}✖${RESET} Conteneur $id_or_pid : échec"
+    fi
+}
+
 case "$choice" in
     0|"")
         echo "Annulé."
         exit 0
         ;;
     a|A)
-        for entry in "${instances[@]}"; do
-            read -r pid port cwd <<< "$entry"
-            project=$(basename "$cwd")
-            kill "$pid" && echo -e "  ${GREEN}✔${RESET} PID $pid ($project :$port) terminé" \
-                        || echo -e "  ${RED}✖${RESET} PID $pid : échec"
+        for entry in "${entries[@]}"; do
+            stop_entry "$entry"
         done
         ;;
     *)
         idx=$((choice - 1))
-        if [[ $idx -ge 0 && $idx -lt ${#instances[@]} ]]; then
-            read -r pid port cwd <<< "${instances[$idx]}"
-            project=$(basename "$cwd")
-            kill "$pid" && echo -e "  ${GREEN}✔${RESET} PID $pid ($project :$port) terminé" \
-                        || echo -e "  ${RED}✖${RESET} PID $pid : échec"
+        if [[ $idx -ge 0 && $idx -lt ${#entries[@]} ]]; then
+            stop_entry "${entries[$idx]}"
         else
             echo -e "  ${RED}✖${RESET} Choix invalide."
             exit 1

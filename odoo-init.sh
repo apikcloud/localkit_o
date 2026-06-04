@@ -200,22 +200,6 @@ fi
 cat > "$COMPOSE_FILE" <<EOF
 services:
   # Service odoo désactivé pour le dev natif (sans Docker)
-  # odoo:
-  #   image: apik/odoo:${ODOO_VERSION}-enterprise
-  #   command: odoo --dev=all
-  #   depends_on:
-  #     - postgres
-  #   ports:
-  #     - "8069:8069"
-  #   environment:
-  #     - HOST=postgres
-  #     - USER=${DB_USER}
-  #     - PASSWORD=${DB_PASSWORD}
-  #   volumes:
-  #     - ./.config:/etc/odoo:rw
-  #     - .:/mnt/extra-addons:rw
-  #     - ${PROJECT_NAME}_odoo:/var/lib/odoo
-
   postgres:
     image: pgvector/pgvector:pg16
     ports:
@@ -229,7 +213,6 @@ services:
       - ${PROJECT_NAME}_postgres:/var/lib/postgresql/data/pgdata
 
 volumes:
-  # ${PROJECT_NAME}_odoo:
   ${PROJECT_NAME}_postgres:
 EOF
 

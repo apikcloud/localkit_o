@@ -3,20 +3,21 @@
 # odoo-init.sh — Initialise un projet Odoo pour le dev natif (sans Docker)
 #
 # Usage : ./odoo-init.sh [--project <nom>] [--version <19.0>] [--db <dbname>]
+#                        [--project-path <path>]
 #         ou interactif si aucun argument fourni
 #
 # Génère / met à jour :
-#   - odoo.conf          (data_dir, addons_path, db_name, db_host)
+#   - .config/odoo.conf  (upsert par sed, création propre sans commentaires)
 #   - .vscode/tasks.json (venv, odoo, postgres, update, scaffold, shell)
-#   - *.code-workspace   (extraPaths Pylance)
+#   - *.code-workspace   (extraPaths Pylance + defaultInterpreterPath)
 #   - .gitignore         (entrées locales ajoutées si absentes)
 #
-# Prérequis : uv, python3, git
+# Prérequis : uv, python3
 # =============================================================================
 
 set -euo pipefail
 
-# ── Couleurs ─────────────────────────────────────────────────────────────────
+# ── Couleurs ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
 
@@ -27,9 +28,10 @@ error()   { echo -e "${RED}✖ ${RESET}$*" >&2; exit 1; }
 header()  { echo -e "\n${BOLD}── $* ──${RESET}"; }
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
-ODOO_BASE="${HOME}/apik/odoo"         # Racine des clones community/enterprise/themes
+ODOO_BASE="${HOME}/apik/odoo"   # Racine des clones community/enterprise/themes
 ODOO_VERSION=""
 PROJECT_NAME=""
+PROJECT_PATH=""                 # Racine du projet (défaut: cwd)
 DB_NAME=""
 DB_HOST="localhost"
 DB_PORT="5432"
@@ -37,31 +39,31 @@ DB_USER="odoo"
 DB_PASSWORD="odoo"
 ADMIN_PASSWD="odoo"
 
-# ── Parsing des arguments ──────────────────────────────────────────────────────
+# ── Parsing des arguments ─────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --project)  PROJECT_NAME="$2"; shift 2 ;;
-        --version)  ODOO_VERSION="$2"; shift 2 ;;
-        --db)       DB_NAME="$2";      shift 2 ;;
+        --project)       PROJECT_NAME="$2";  shift 2 ;;
+        --version)       ODOO_VERSION="$2";  shift 2 ;;
+        --db)            DB_NAME="$2";       shift 2 ;;
+        --project-path)  PROJECT_PATH="$2";  shift 2 ;;
         --help|-h)
-            echo "Usage: $0 [--project NAME] [--version X.0] [--db DBNAME]"
+            echo "Usage: $0 [--project NAME] [--version X.0] [--db DBNAME] [--project-path PATH]"
             exit 0 ;;
         *) error "Argument inconnu : $1" ;;
     esac
 done
 
-# ── Mode interactif si paramètres manquants ────────────────────────────────────
+# ── Mode interactif si paramètres manquants ───────────────────────────────────
 header "Configuration du projet Odoo"
 
 if [[ -z "$PROJECT_NAME" ]]; then
-    # Essaie de deviner depuis le nom du répertoire courant
     default_name=$(basename "$(pwd)" | sed 's/^odoo-//')
     read -rp "  Nom du projet [${default_name}]: " PROJECT_NAME
     PROJECT_NAME="${PROJECT_NAME:-$default_name}"
 fi
 
 if [[ -z "$ODOO_VERSION" ]]; then
-    # Essaie de lire depuis odoo_version.txt (format apik/odoo:19.0-xxxx-enterprise)
+    detected=""
     if [[ -f "odoo_version.txt" ]]; then
         detected=$(grep -oP '\d+\.\d+' odoo_version.txt | head -1 || true)
     fi
@@ -76,6 +78,13 @@ if [[ -z "$DB_NAME" ]]; then
     DB_NAME="${DB_NAME:-$default_db}"
 fi
 
+if [[ -z "$PROJECT_PATH" ]]; then
+    default_path="$(pwd)"
+    read -rp "  Racine du projet [${default_path}]: " PROJECT_PATH
+    PROJECT_PATH="${PROJECT_PATH:-$default_path}"
+fi
+PROJECT_PATH="$(realpath "${PROJECT_PATH/#\~/$HOME}")"
+
 # ── Chemins dérivés ───────────────────────────────────────────────────────────
 COMMUNITY_PATH="${ODOO_BASE}/${ODOO_VERSION}/community"
 ENTERPRISE_PATH="${ODOO_BASE}/${ODOO_VERSION}/enterprise"
@@ -83,53 +92,65 @@ THEMES_PATH="${ODOO_BASE}/${ODOO_VERSION}/themes"
 FILESTORE_DIR="/tmp/odoo/${PROJECT_NAME}"
 VENV_DIR=".venv"
 WORKSPACE_FILE="${PROJECT_NAME}.code-workspace"
-CONF_FILE="odoo.conf"
+CONF_DIR=".config"
+CONF_FILE="${CONF_DIR}/odoo.conf"
+ODOO_BIN="${COMMUNITY_PATH}/odoo-bin"
 
 # ── Vérifications ─────────────────────────────────────────────────────────────
 header "Vérifications"
 
-command -v uv &>/dev/null || error "'uv' n'est pas installé. Installe-le via : curl -Ls https://astral.sh/uv/install.sh | sh"
+command -v uv &>/dev/null \
+    || error "'uv' n'est pas installé. Installe-le via : curl -Ls https://astral.sh/uv/install.sh | sh"
 
 for dir in "$COMMUNITY_PATH" "$ENTERPRISE_PATH" "$THEMES_PATH"; do
     if [[ -d "$dir" ]]; then
         success "Trouvé : $dir"
     else
-        warn "Absent  : $dir  (sera ignoré dans addons_path)"
+        warn "Absent  : $dir  (ignoré dans addons_path)"
     fi
 done
 
 # ── Calcul de l'addons_path ───────────────────────────────────────────────────
 addons_paths=()
-[[ -d "$COMMUNITY_PATH/addons" ]] && addons_paths+=("${COMMUNITY_PATH}/addons")
-[[ -d "$ENTERPRISE_PATH" ]]       && addons_paths+=("$ENTERPRISE_PATH")
-[[ -d "$THEMES_PATH" ]]           && addons_paths+=("$THEMES_PATH")
-addons_paths+=(".")   # Toujours le projet courant en dernier
+[[ -d "${COMMUNITY_PATH}/addons" ]] && addons_paths+=("${COMMUNITY_PATH}/addons")
+[[ -d "$ENTERPRISE_PATH" ]]         && addons_paths+=("$ENTERPRISE_PATH")
+[[ -d "$THEMES_PATH" ]]             && addons_paths+=("$THEMES_PATH")
+addons_paths+=("$PROJECT_PATH")     # Racine du projet (là où est le .workspace)
 
 ADDONS_PATH=$(IFS=,; echo "${addons_paths[*]}")
 
-# ── Filestore dans /tmp ────────────────────────────────────────────────────────
+# ── Filestore dans /tmp ───────────────────────────────────────────────────────
 header "Filestore"
 mkdir -p "$FILESTORE_DIR"
 success "Filestore : $FILESTORE_DIR  (éphémère, nettoyé au reboot)"
 
-# ── odoo.conf ─────────────────────────────────────────────────────────────────
-header "odoo.conf"
+# ── Fonction upsert pour odoo.conf ────────────────────────────────────────────
+# Remplace la valeur si la clé existe (même commentée), sinon ajoute à la fin.
+upsert_conf() {
+    local file="$1" key="$2" value="$3"
+    if grep -qE "^;?[[:space:]]*${key}[[:space:]]*=" "$file" 2>/dev/null; then
+        sed -i -E "s|^;?[[:space:]]*${key}[[:space:]]*=.*|${key} = ${value}|" "$file"
+    else
+        echo "${key} = ${value}" >> "$file"
+    fi
+}
 
-cat > "$CONF_FILE" <<EOF
+# ── .config/odoo.conf ─────────────────────────────────────────────────────────
+header ".config/odoo.conf"
+mkdir -p "$CONF_DIR"
+
+if [[ ! -f "$CONF_FILE" ]]; then
+    info "Création de $CONF_FILE"
+    cat > "$CONF_FILE" <<EOF
 [options]
-; ── Chemins ──────────────────────────────────────────────────────────────────
 addons_path = ${ADDONS_PATH}
 data_dir = ${FILESTORE_DIR}
-
-; ── Base de données ──────────────────────────────────────────────────────────
 db_host = ${DB_HOST}
 db_port = ${DB_PORT}
 db_user = ${DB_USER}
 db_password = ${DB_PASSWORD}
 db_name = ${DB_NAME}
 admin_passwd = ${ADMIN_PASSWD}
-
-; ── Limites (dev) ─────────────────────────────────────────────────────────────
 limit_memory_soft = 1077721600
 limit_memory_hard = 3355443200
 limit_request = 8192
@@ -137,74 +158,115 @@ limit_time_cpu = 3200
 limit_time_real = 3200
 max_cron_threads = 0
 workers = 0
-
-; ── Logging ───────────────────────────────────────────────────────────────────
 log_level = info
 EOF
+    success "$CONF_FILE créé"
+else
+    info "Mise à jour de $CONF_FILE (upsert)"
+    # Garantit que [options] est présent
+    grep -q '^\[options\]' "$CONF_FILE" || sed -i '1s/^/[options]\n/' "$CONF_FILE"
 
-success "odoo.conf écrit"
+    upsert_conf "$CONF_FILE" "addons_path"       "$ADDONS_PATH"
+    upsert_conf "$CONF_FILE" "data_dir"          "$FILESTORE_DIR"
+    upsert_conf "$CONF_FILE" "db_host"           "$DB_HOST"
+    upsert_conf "$CONF_FILE" "db_port"           "$DB_PORT"
+    upsert_conf "$CONF_FILE" "db_user"           "$DB_USER"
+    upsert_conf "$CONF_FILE" "db_password"       "$DB_PASSWORD"
+    upsert_conf "$CONF_FILE" "db_name"           "$DB_NAME"
+    upsert_conf "$CONF_FILE" "admin_passwd"      "$ADMIN_PASSWD"
+    upsert_conf "$CONF_FILE" "limit_memory_soft" "1077721600"
+    upsert_conf "$CONF_FILE" "limit_memory_hard" "3355443200"
+    upsert_conf "$CONF_FILE" "limit_request"     "8192"
+    upsert_conf "$CONF_FILE" "limit_time_cpu"    "3200"
+    upsert_conf "$CONF_FILE" "limit_time_real"   "3200"
+    upsert_conf "$CONF_FILE" "max_cron_threads"  "0"
+    upsert_conf "$CONF_FILE" "workers"           "0"
+    upsert_conf "$CONF_FILE" "log_level"         "info"
+
+    success "$CONF_FILE mis à jour"
+fi
 
 # ── .vscode/tasks.json ────────────────────────────────────────────────────────
+# Les vars bash sont passées via sys.argv pour éviter toute substitution dans
+# les literals VSCode (${workspaceFolder}, ${input:...}).
 header ".vscode/tasks.json"
 mkdir -p .vscode
 
-# Calcul du python_path depuis community (pour odoo-bin)
-ODOO_BIN="${COMMUNITY_PATH}/odoo-bin"
+python3 /dev/stdin \
+    "$VENV_DIR" "$ODOO_BIN" "$CONF_FILE" "$DB_NAME" "$COMMUNITY_PATH" \
+    > .vscode/tasks.json <<'PYEOF'
+import json, sys
 
-cat > .vscode/tasks.json <<EOF
-{
+venv, odoo_bin, conf, db, community = sys.argv[1:]
+
+# Literals VSCode — ne doivent pas être substitués par bash
+WS       = "${workspaceFolder}"
+I_MODULE = "${input:moduleUpdate}"
+I_NAME   = "${input:moduleName}"
+
+tasks = {
     "version": "2.0.0",
     "tasks": [
         {
             "label": "🐍 Venv: créer / mettre à jour",
             "type": "shell",
-            "command": "uv venv ${VENV_DIR} && uv pip install -r ${COMMUNITY_PATH}/requirements.txt && uv pip install -r requirements.txt",
-            "options": { "cwd": "\${workspaceFolder}" },
+            "command": (
+                f"uv venv {venv} "
+                f"&& uv pip install -r {community}/requirements.txt "
+                f"&& uv pip install -r requirements.txt"
+            ),
+            "options": {"cwd": WS},
             "group": "build",
-            "presentation": { "reveal": "always", "panel": "shared" },
+            "presentation": {"reveal": "always", "panel": "shared"},
             "problemMatcher": []
         },
         {
             "label": "🐘 PostgreSQL: démarrer",
             "type": "shell",
             "command": "docker compose up postgres -d",
-            "options": { "cwd": "\${workspaceFolder}" },
+            "options": {"cwd": WS},
             "group": "build",
-            "presentation": { "reveal": "always", "panel": "shared" },
+            "presentation": {"reveal": "always", "panel": "shared"},
             "problemMatcher": []
         },
         {
             "label": "🟢 Odoo: lancer",
             "type": "shell",
-            "command": "${VENV_DIR}/bin/python ${ODOO_BIN} --config=${CONF_FILE} --dev=all",
-            "options": { "cwd": "\${workspaceFolder}" },
+            "command": f"{venv}/bin/python {odoo_bin} --config={conf} --dev=all",
+            "options": {"cwd": WS},
             "group": "build",
             "dependsOn": "🐘 PostgreSQL: démarrer",
-            "presentation": { "reveal": "always", "panel": "dedicated", "focus": true },
+            "presentation": {"reveal": "always", "panel": "dedicated", "focus": True},
             "problemMatcher": []
         },
         {
             "label": "🔄 Odoo: update module",
             "type": "shell",
-            "command": "\${input:moduleUpdate}",
-            "options": { "cwd": "\${workspaceFolder}" },
-            "presentation": { "reveal": "always", "panel": "shared" },
+            "command": (
+                f"{venv}/bin/python {odoo_bin} "
+                f"--config={conf} "
+                f"--db_name={db} "
+                f"-u {I_MODULE} "
+                "--stop-after-init"
+            ),
+            "options": {"cwd": WS},
+            "presentation": {"reveal": "always", "panel": "shared"},
             "problemMatcher": []
         },
         {
             "label": "🛠  Odoo: scaffold module",
             "type": "shell",
-            "command": "${VENV_DIR}/bin/python ${ODOO_BIN} scaffold \${input:moduleName} .",
-            "options": { "cwd": "\${workspaceFolder}" },
-            "presentation": { "reveal": "always", "panel": "shared" },
+            "command": f"{venv}/bin/python {odoo_bin} scaffold {I_NAME} .",
+            "options": {"cwd": WS},
+            "presentation": {"reveal": "always", "panel": "shared"},
             "problemMatcher": []
         },
         {
             "label": "🐚 Odoo: shell",
             "type": "shell",
-            "command": "${VENV_DIR}/bin/python ${ODOO_BIN} shell --config=${CONF_FILE} --db_name=${DB_NAME}",
-            "options": { "cwd": "\${workspaceFolder}" },
-            "presentation": { "reveal": "always", "panel": "dedicated", "focus": true },
+            "command": f"{venv}/bin/python {odoo_bin} shell --config={conf} --db_name={db}",
+            "options": {"cwd": WS},
+            "presentation": {"reveal": "always", "panel": "dedicated", "focus": True},
             "problemMatcher": []
         }
     ],
@@ -223,29 +285,8 @@ cat > .vscode/tasks.json <<EOF
         }
     ]
 }
-EOF
 
-# Patch de la commande update avec la valeur résolue (le promptString gère déjà le nom)
-# La task update utilise une commande construite depuis l'input, on la complète :
-python3 - <<PYEOF
-import json, sys
-
-with open(".vscode/tasks.json") as f:
-    data = json.load(f)
-
-for t in data["tasks"]:
-    if "update module" in t["label"]:
-        t["command"] = (
-            "${VENV_DIR}/bin/python ${ODOO_BIN} "
-            "--config=${CONF_FILE} "
-            "--db_name=${DB_NAME} "
-            "-u \${input:moduleUpdate} "
-            "--stop-after-init"
-        )
-
-with open(".vscode/tasks.json", "w") as f:
-    json.dump(data, f, indent=4, ensure_ascii=False)
-    f.write("\n")
+print(json.dumps(tasks, indent=4, ensure_ascii=False))
 PYEOF
 
 success ".vscode/tasks.json écrit"
@@ -253,56 +294,47 @@ success ".vscode/tasks.json écrit"
 # ── *.code-workspace ──────────────────────────────────────────────────────────
 header "Code workspace"
 
-# Chemins extraPaths : uniquement ceux qui existent
 extra_paths=()
 [[ -d "$COMMUNITY_PATH" ]] && extra_paths+=("$COMMUNITY_PATH")
 [[ -d "$ENTERPRISE_PATH" ]] && extra_paths+=("$ENTERPRISE_PATH")
-[[ -d "$THEMES_PATH" ]] && extra_paths+=("$THEMES_PATH")
+[[ -d "$THEMES_PATH" ]]     && extra_paths+=("$THEMES_PATH")
 
-python3 - <<PYEOF
-import json, os
+python3 /dev/stdin "$WORKSPACE_FILE" "${extra_paths[@]:-}" <<'PYEOF'
+import json, sys
 
-extra = $(python3 -c "import json; print(json.dumps(extra_paths))" 2>/dev/null || echo "[]")
-
-# Recalcule depuis bash (plus sûr)
-paths_raw = """${extra_paths[*]:-}"""
-extra = [p for p in paths_raw.split() if p]
+outfile  = sys.argv[1]
+extra    = [p for p in sys.argv[2:] if p]
 
 workspace = {
     "folders": [{"path": "."}],
     "settings": {
-        "python.analysis.extraPaths": extra,
+        "python.analysis.extraPaths":    extra,
         "python.autoComplete.extraPaths": extra,
         "python.defaultInterpreterPath": ".venv/bin/python",
     }
 }
 
-outfile = "${WORKSPACE_FILE}"
 with open(outfile, "w") as f:
     json.dump(workspace, f, indent=4, ensure_ascii=False)
     f.write("\n")
-print(f"  ✔ {outfile}")
 PYEOF
 
 success "Workspace écrit : ${WORKSPACE_FILE}"
 
-# ── .gitignore — ajout des entrées locales ────────────────────────────────────
+# ── .gitignore ────────────────────────────────────────────────────────────────
 header ".gitignore"
 
 GITIGNORE_ADDITIONS=(
     "# Odoo dev local"
     ".venv/"
-    ".odoo-data/"
-    "odoo.conf"
+    ".config/odoo.conf"
     ".vscode/tasks.json"
     "${WORKSPACE_FILE}"
     "*.log"
     "__pycache__/"
 )
 
-if [[ ! -f ".gitignore" ]]; then
-    touch .gitignore
-fi
+[[ ! -f ".gitignore" ]] && touch .gitignore
 
 added=0
 for line in "${GITIGNORE_ADDITIONS[@]}"; do
@@ -312,21 +344,20 @@ for line in "${GITIGNORE_ADDITIONS[@]}"; do
     fi
 done
 
-if [[ $added -gt 0 ]]; then
-    success ".gitignore — $added entrées ajoutées"
-else
-    info ".gitignore — rien à ajouter"
-fi
+[[ $added -gt 0 ]] && success ".gitignore — $added entrées ajoutées" \
+                   || info    ".gitignore — rien à ajouter"
 
 # ── Résumé ────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}╔══════════════════════════════════════════════════════╗${RESET}"
-echo -e "${BOLD}║  Projet ${PROJECT_NAME} (Odoo ${ODOO_VERSION}) prêt          ${RESET}"
+echo -e "${BOLD}║  Projet ${PROJECT_NAME} (Odoo ${ODOO_VERSION}) prêt${RESET}"
 echo -e "${BOLD}╠══════════════════════════════════════════════════════╣${RESET}"
-echo -e "  Filestore   : ${FILESTORE_DIR}"
-echo -e "  DB          : ${DB_NAME} @ ${DB_HOST}:${DB_PORT}"
-echo -e "  Addons      : ${ADDONS_PATH}"
-echo -e "  Venv        : .venv  (uv)"
+echo -e "  Projet     : ${PROJECT_PATH}"
+echo -e "  Filestore  : ${FILESTORE_DIR}"
+echo -e "  DB         : ${DB_NAME} @ ${DB_HOST}:${DB_PORT}"
+echo -e "  Conf       : ${CONF_FILE}"
+echo -e "  Addons     : ${ADDONS_PATH}"
+echo -e "  Venv       : ${VENV_DIR}  (uv)"
 echo -e ""
 echo -e "  ${CYAN}Prochaine étape :${RESET}"
 echo -e "    Ctrl+Shift+P → Tasks: Run Task → 🐍 Venv: créer / mettre à jour"

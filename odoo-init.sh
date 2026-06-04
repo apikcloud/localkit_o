@@ -200,6 +200,22 @@ fi
 cat > "$COMPOSE_FILE" <<EOF
 services:
   # Service odoo désactivé pour le dev natif (sans Docker)
+  # odoo:
+  #   image: apik/odoo:${ODOO_VERSION}-enterprise
+  #   command: odoo --dev=all
+  #   depends_on:
+  #     - postgres
+  #   ports:
+  #     - "8069:8069"
+  #   environment:
+  #     - HOST=postgres
+  #     - USER=${DB_USER}
+  #     - PASSWORD=${DB_PASSWORD}
+  #   volumes:
+  #     - ./.config:/etc/odoo:rw
+  #     - .:/mnt/extra-addons:rw
+  #     - ${PROJECT_NAME}_odoo:/var/lib/odoo
+
   postgres:
     image: pgvector/pgvector:pg16
     ports:
@@ -213,6 +229,7 @@ services:
       - ${PROJECT_NAME}_postgres:/var/lib/postgresql/data/pgdata
 
 volumes:
+  # ${PROJECT_NAME}_odoo:
   ${PROJECT_NAME}_postgres:
 EOF
 
@@ -277,10 +294,18 @@ tasks = {
         {
             "label": "🟢 Odoo: lancer",
             "type": "shell",
-            "command": f"{venv}/bin/python {odoo_bin} --config={conf} --dev=all",
+            "command": "bash .vscode/odoo-start.sh",
             "options": {"cwd": WS},
             "group": "build",
             "dependsOn": "🐘 PostgreSQL: démarrer",
+            "presentation": DEDICATED,
+            "problemMatcher": []
+        },
+        {
+            "label": "🔍 Odoo: gérer les instances",
+            "type": "shell",
+            "command": "bash .vscode/odoo-ps.sh",
+            "options": {"cwd": WS},
             "presentation": DEDICATED,
             "problemMatcher": []
         },
@@ -342,6 +367,175 @@ PYEOF
 
 success ".vscode/tasks.json écrit"
 
+# ── .vscode/odoo-start.sh ─────────────────────────────────────────────────────
+# Wrapper appelé par la task "Odoo: lancer".
+# Vérifie si le port 8069 est libre ; propose un alternatif via read sinon.
+header ".vscode/odoo-start.sh"
+
+cat > .vscode/odoo-start.sh <<EOF
+#!/usr/bin/env bash
+# Généré par odoo-init.sh — ne pas versionner (.gitignore)
+set -euo pipefail
+
+VENV="${PROJECT_PATH}/${VENV_DIR}"
+ODOO_BIN="${ODOO_BIN}"
+CONF="${PROJECT_PATH}/${CONF_FILE}"
+DEFAULT_PORT=8069
+
+# ── Couleurs ──────────────────────────────────────────────────────────────────
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
+
+# ── Détection des instances Odoo actives ──────────────────────────────────────
+check_port() {
+    lsof -iTCP:\$1 -sTCP:LISTEN -t 2>/dev/null | head -1
+}
+
+find_odoo_instances() {
+    # Retourne les PIDs de tous les processus odoo-bin en écoute
+    lsof -iTCP -sTCP:LISTEN 2>/dev/null \
+        | awk '\$1 == "python" || \$1 == "python3" {print \$2, \$9}' \
+        | sort -u \
+        | while read -r pid portinfo; do
+            cmdline=\$(cat /proc/\$pid/cmdline 2>/dev/null | tr '\0' ' ' || true)
+            if echo "\$cmdline" | grep -q "odoo-bin"; then
+                port=\$(echo "\$portinfo" | grep -oP ':\K[0-9]+$' || echo "?")
+                cwd=\$(readlink /proc/\$pid/cwd 2>/dev/null || echo "inconnu")
+                echo "\$pid \$port \$cwd"
+            fi
+        done
+}
+
+# ── Choix du port ─────────────────────────────────────────────────────────────
+PORT=\$DEFAULT_PORT
+occupant=\$(check_port \$PORT || true)
+
+if [[ -n "\$occupant" ]]; then
+    echo ""
+    echo -e "\${YELLOW}⚠ Port \$PORT déjà utilisé.\${RESET}"
+    echo ""
+    echo -e "\${BOLD}Instances Odoo actives :\${RESET}"
+
+    instances=\$(find_odoo_instances)
+    if [[ -n "\$instances" ]]; then
+        echo "\$instances" | while read -r pid port cwd; do
+            echo -e "  PID \${CYAN}\$pid\${RESET}  port \${CYAN}\$port\${RESET}  \$cwd"
+        done
+    else
+        echo -e "  \${YELLOW}(aucune instance odoo-bin détectée — port occupé par un autre process)\${RESET}"
+    fi
+
+    echo ""
+    read -rp "  Port à utiliser [laisser vide pour annuler] : " input_port
+    [[ -z "\$input_port" ]] && { echo "Annulé."; exit 0; }
+    PORT="\$input_port"
+
+    # Vérifier que le nouveau port est libre lui aussi
+    if lsof -iTCP:\$PORT -sTCP:LISTEN -t &>/dev/null; then
+        echo -e "\${RED}✖ Port \$PORT également occupé. Abandon.\${RESET}"
+        exit 1
+    fi
+fi
+
+echo ""
+echo -e "\${GREEN}▶ Lancement Odoo sur le port \${PORT}…\${RESET}"
+echo ""
+
+exec "\$VENV/bin/python" "\$ODOO_BIN" \\
+    --config="\$CONF" \\
+    --http-port="\$PORT" \\
+    --dev=all
+EOF
+
+chmod +x .vscode/odoo-start.sh
+success ".vscode/odoo-start.sh écrit"
+
+# ── .vscode/odoo-ps.sh ────────────────────────────────────────────────────────
+# Script appelé par la task "Odoo: gérer les instances".
+# Liste toutes les instances odoo-bin actives et propose de les terminer.
+header ".vscode/odoo-ps.sh"
+
+cat > .vscode/odoo-ps.sh <<'PSEOF'
+#!/usr/bin/env bash
+# Généré par odoo-init.sh — ne pas versionner (.gitignore)
+set -euo pipefail
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
+
+echo ""
+echo -e "${BOLD}── Instances Odoo actives ──${RESET}"
+echo ""
+
+# Collecte : PID port cwd pour chaque process odoo-bin en écoute TCP
+mapfile -t instances < <(
+    lsof -iTCP -sTCP:LISTEN 2>/dev/null \
+        | awk '$1 == "python" || $1 == "python3" {print $2, $9}' \
+        | sort -u \
+        | while read -r pid portinfo; do
+            cmdline=$(cat /proc/$pid/cmdline 2>/dev/null | tr '\0' ' ' || true)
+            if echo "$cmdline" | grep -q "odoo-bin"; then
+                port=$(echo "$portinfo" | grep -oP ':\K[0-9]+$' || echo "?")
+                cwd=$(readlink /proc/$pid/cwd 2>/dev/null || echo "inconnu")
+                echo "$pid $port $cwd"
+            fi
+        done
+)
+
+if [[ ${#instances[@]} -eq 0 ]]; then
+    echo -e "  ${GREEN}Aucune instance Odoo en cours d'exécution.${RESET}"
+    echo ""
+    exit 0
+fi
+
+# Affichage
+i=1
+for entry in "${instances[@]}"; do
+    read -r pid port cwd <<< "$entry"
+    project=$(basename "$cwd")
+    echo -e "  ${CYAN}[$i]${RESET}  PID ${BOLD}$pid${RESET}  :${port}  ${YELLOW}$project${RESET}  (${cwd})"
+    ((i++))
+done
+
+echo ""
+echo -e "  ${CYAN}[a]${RESET}  Terminer toutes les instances"
+echo -e "  ${CYAN}[0]${RESET}  Annuler"
+echo ""
+read -rp "  Choix : " choice
+
+case "$choice" in
+    0|"")
+        echo "Annulé."
+        exit 0
+        ;;
+    a|A)
+        for entry in "${instances[@]}"; do
+            read -r pid port cwd <<< "$entry"
+            project=$(basename "$cwd")
+            kill "$pid" && echo -e "  ${GREEN}✔${RESET} PID $pid ($project :$port) terminé" \
+                        || echo -e "  ${RED}✖${RESET} PID $pid : échec"
+        done
+        ;;
+    *)
+        idx=$((choice - 1))
+        if [[ $idx -ge 0 && $idx -lt ${#instances[@]} ]]; then
+            read -r pid port cwd <<< "${instances[$idx]}"
+            project=$(basename "$cwd")
+            kill "$pid" && echo -e "  ${GREEN}✔${RESET} PID $pid ($project :$port) terminé" \
+                        || echo -e "  ${RED}✖${RESET} PID $pid : échec"
+        else
+            echo -e "  ${RED}✖${RESET} Choix invalide."
+            exit 1
+        fi
+        ;;
+esac
+
+echo ""
+PSEOF
+
+chmod +x .vscode/odoo-ps.sh
+success ".vscode/odoo-ps.sh écrit"
+
 # ── *.code-workspace ──────────────────────────────────────────────────────────
 header "Code workspace"
 
@@ -380,6 +574,8 @@ GITIGNORE_ADDITIONS=(
     ".venv/"
     ".config/odoo.conf"
     ".vscode/tasks.json"
+    ".vscode/odoo-start.sh"
+    ".vscode/odoo-ps.sh"
     "${WORKSPACE_FILE}"
     "*.log"
     "__pycache__/"

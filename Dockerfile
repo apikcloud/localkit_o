@@ -1,4 +1,4 @@
-FROM apik/odoo:19.0-20260131-enterprise
+FROM apik/odoo:19.0-20260515-enterprise
 
 USER root
 
@@ -9,8 +9,8 @@ RUN if getent group 1000; then groupmod -g 1001 $(getent group 1000 | cut -d: -f
 
 RUN ls -la .
 RUN apt-get update && apt-get install -y --no-install-recommends git zip unzip build-essential bash-completion
-COPY requirements.txt .
-RUN pip3 install --no-cache-dir --break-system-packages --ignore-installed -r requirements.txt
+# COPY requirements.txt .
+# RUN pip3 install --no-cache-dir --break-system-packages --ignore-installed -r requirements.txt
 RUN rm -rf /var/lib/apt/lists/*
 
 # Install bash completion for odoo command

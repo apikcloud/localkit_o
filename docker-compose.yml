@@ -6,24 +6,33 @@ services:
     ports:
       - "8069:8069"
     env_file:
-      - ${PWD}/.env
+      - ./.env
     volumes:
       - ./config:/etc/odoo:rw
       - ./src:/mnt/extra-addons:rw
       - filestore:/var/lib/odoo/data/filestore:rw
       - vscode-server-cache:/home/.vscode-server-insiders
+    networks:
+      - default
   postgres:
-    image: postgres:15.0
+    image: pgvector/pgvector:pg15
     env_file:
-      - .env
+      - ./.env
     environment:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_USER=${POSTGRES_USER}
       - PGDATA=/var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data/pgdata
+    networks:
+      - default
 volumes:
   postgres-data:
   filestore:
   vscode-server-cache:
+networks:
+  default:
+    driver: bridge

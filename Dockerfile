@@ -14,15 +14,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends git zip unzip b
 RUN rm -rf /var/lib/apt/lists/*
 
 # Install bash completion for odoo command
-COPY odoo-completion.bash /etc/bash_completion.d/odoo
-RUN chmod 644 /etc/bash_completion.d/odoo
+# COPY odoo-completion.bash /etc/bash_completion.d/odoo
+# RUN chmod 644 /etc/bash_completion.d/odoo
 
 RUN mkdir -p /var/lib/odoo/data/filestore /mnt/extra-addons /etc/odoo \
     && chown -R odoo:odoo /var/lib/odoo /mnt/extra-addons /etc/odoo
 
-RUN echo "odoo ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+RUN chmod -R 777 /usr/lib/python3/dist-packages/odoo
 USER odoo
 
-RUN source /etc/bash_completion && echo "source /etc/bash_completion" >> ~/.bashrc
+# RUN source /etc/bash_completion && echo "source /etc/bash_completion" >> ~/.bashrc
 
 EXPOSE 8069 8071 8072
